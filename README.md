@@ -39,4 +39,4 @@ npm start
 
 ## Using with MCP clients
 Add an entry to your MCP-compatible client pointing to `mcp-travis` (the built binary) and ensure the environment
-variables are available in the client’s environment/session.
+variables are available in the client's environment/session.
