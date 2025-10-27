@@ -44,7 +44,6 @@ async function travis(path: string, init: any = {}) {
   }
 }
 
-// ---------- Resource templates ----------
 const resourceTemplates = [
   {
     uriTemplate: "travis:recent-builds?repo={owner}/{name}&limit={limit}",
@@ -66,7 +65,6 @@ const resourceTemplates = [
   }
 ];
 
-// ---------- Tools ----------
 const tools = [
   {
     name: "travis_triggerBuild",
