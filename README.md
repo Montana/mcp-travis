@@ -1,6 +1,16 @@
 # mcp-travis
 Model Context Protocol (MCP) server that exposes Travis CI as tools/resources.
 
+## Usage
+
+https://github.com/user-attachments/assets/0e8cfa5b-f78f-4a27-8348-8a38e518bf98
+
+Once you've seen you triggered a build right inside of Claude, you can then go to the repository in question: 
+
+<img width="936" height="464" alt="Screenshot 2025-10-27 at 10 25 20 AM" src="https://github.com/user-attachments/assets/970a9476-732b-4fbe-a246-287c19f41d7b" />
+
+As you can see it's been triggered by Travis MCP. 
+
 ## What you get
 - **Resources**
   - `travis:recent-builds?repo=owner/name&limit=20`
@@ -38,5 +48,10 @@ npm start
 ```
 
 ## Using with MCP clients
+
 Add an entry to your MCP-compatible client pointing to `mcp-travis` (the built binary) and ensure the environment
 variables are available in the client's environment/session.
+
+## Author
+
+Michael Mendy (c) 2025. 
