@@ -7,7 +7,7 @@ https://github.com/user-attachments/assets/0e8cfa5b-f78f-4a27-8348-8a38e518bf98
 
 Once you've seen you triggered a build right inside of Claude, you can then go to the repository in question: 
 
-<img width="936" height="464" alt="Screenshot 2025-10-27 at 10 25 20 AM" src="https://github.com/user-attachments/assets/970a9476-732b-4fbe-a246-287c19f41d7b" />
+<img width="1239" height="400" alt="Screenshot 2025-10-27 at 10 35 49 AM" src="https://github.com/user-attachments/assets/4b00b3ec-32d3-4e87-9c9c-f6286cc5d070" />
 
 As you can see it's been triggered by Travis MCP. 
 
