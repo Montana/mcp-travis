@@ -96,7 +96,7 @@ const resourceTemplates = [
 const tools = [
   {
     name: "travis_triggerBuild",
-    description: "Trigger a build for a repo and branch, with optional config overrides.",
+    description: "⚠️ TRIGGER/START a NEW build for a repo and branch. WARNING: This starts a new CI build. DO NOT use this to view existing build logs - use travis_getBuildLogs instead.",
     inputSchema: {
       type: "object",
       required: ["repo", "branch"],
@@ -139,7 +139,7 @@ const tools = [
   },
   {
     name: "travis_getBuildLogs",
-    description: "Convenience tool to fetch all logs for all jobs in a build. Returns combined logs from all jobs.",
+    description: "VIEW/READ/FETCH build logs for an existing build. Use this to get, show, see, read, or view logs from a build by its build ID. Returns combined logs from all jobs. This is a READ-ONLY operation.",
     inputSchema: {
       type: "object",
       required: ["buildId"],
