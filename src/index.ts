@@ -147,6 +147,17 @@ const tools = [
         buildId: { type: "integer", description: "The build ID to get all logs for" }
       }
     }
+  },
+  {
+    name: "travis_getOwnerStats",
+    description: "Get statistics and information for a Travis CI user or organization. Shows active repos, build counts, and account details.",
+    inputSchema: {
+      type: "object",
+      required: ["owner"],
+      properties: {
+        owner: { type: "string", description: "GitHub username or organization name (e.g., 'travis-ci' or 'rails')" }
+      }
+    }
   }
 ];
 
@@ -314,6 +325,66 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         output += "-".repeat(80) + "\n";
         output += jobLog.log + "\n";
         output += "=".repeat(80) + "\n\n";
+      }
+
+      return { content: [{ type: "text", text: output }] };
+    }
+
+    if (name === "travis_getOwnerStats") {
+      const owner = args?.owner as string;
+
+      if (!owner) {
+        throw new Error("Parameter 'owner' is required");
+      }
+
+      // Get owner information
+      const ownerData = await travis(`/owner/${encodeURIComponent(owner)}`);
+
+      // Get repositories for this owner
+      const reposData = await travis(`/owner/${encodeURIComponent(owner)}/repos?limit=100&sort_by=last_started_at:desc`);
+
+      // Format the output
+      let output = `Travis CI Statistics for: ${owner}\n`;
+      output += "=".repeat(80) + "\n\n";
+
+      // Owner info
+      output += `Owner Type: ${ownerData.login ? 'User' : 'Organization'}\n`;
+      output += `Name: ${ownerData.name || owner}\n`;
+      output += `GitHub ID: ${ownerData.github_id || 'N/A'}\n`;
+      if (ownerData.avatar_url) output += `Avatar: ${ownerData.avatar_url}\n`;
+      output += `\n`;
+
+      // Repository stats
+      const repos = reposData.repositories || [];
+      const activeRepos = repos.filter((r: any) => r.active);
+
+      output += `Repository Statistics:\n`;
+      output += `-`.repeat(80) + `\n`;
+      output += `Total Repositories: ${repos.length}\n`;
+      output += `Active Repositories: ${activeRepos.length}\n`;
+      output += `\n`;
+
+      // Recent builds summary
+      if (activeRepos.length > 0) {
+        output += `Recent Active Repositories:\n`;
+        output += `-`.repeat(80) + `\n`;
+
+        for (const repo of activeRepos.slice(0, 10)) {
+          const lastBuild = repo.last_build;
+          if (lastBuild) {
+            const state = lastBuild.state || 'unknown';
+            const emoji = state === 'passed' ? '✓' : state === 'failed' ? '✗' : '○';
+            output += `${emoji} ${repo.slug}\n`;
+            output += `   Last Build: #${lastBuild.number} - ${state} (${lastBuild.finished_at || 'in progress'})\n`;
+          } else {
+            output += `○ ${repo.slug}\n`;
+            output += `   No builds yet\n`;
+          }
+        }
+
+        if (activeRepos.length > 10) {
+          output += `\n... and ${activeRepos.length - 10} more active repositories\n`;
+        }
       }
 
       return { content: [{ type: "text", text: output }] };
