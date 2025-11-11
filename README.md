@@ -5,6 +5,7 @@ Model Context Protocol (MCP) server that exposes Travis CI API as tools and reso
 **Features:**
 - 🚀 Trigger, restart, and cancel builds
 - 📊 View build logs and job details
+- 🔄 Compare builds to debug failures
 - 📈 Get organization/user statistics
 - 🔍 Monitor Travis CI service status
 - 🔧 Manage builds through natural language
@@ -32,6 +33,7 @@ Below I'll explain more about what you can do with the Travis MCP server.
 Here are some things you can ask Claude with this MCP server:
 
 - **"Show me the logs for Travis build 276783990"** - View complete build logs
+- **"Compare builds 276783990 and 276783991"** - See what changed between two builds
 - **"Trigger a build for travis-ci/travis-web on branch deploy_2025.11.10"** - Start a new build
 - **"What's the Travis CI status for the rails organization?"** - Get org statistics
 - **"Is Travis CI down?"** - Check service operational status
@@ -60,6 +62,7 @@ Here are some things you can ask Claude with this MCP server:
 | `travis_getBuildLogs` | Fetch and combine logs from all jobs in a build (convenience tool) |
 | `travis_getOwnerStats` | Get statistics and information for a Travis CI user or organization |
 | `travis_getServiceStatus` | Check the operational status of Travis CI services |
+| `travis_compareBuilds` | Compare two builds to see what changed between them |
 
 ### Getting Build Logs
 
@@ -200,9 +203,114 @@ Service Components:
 Status Page: https://www.traviscistatus.com
 ```
 
+### Comparing Builds
+
+Use `travis_compareBuilds` to understand what changed between two builds:
+
+```
+Ask Claude: "Compare Travis builds 276783990 and 276783991"
+Ask Claude: "Why did build 100 pass but build 101 fail?"
+```
+
+This returns a detailed comparison showing:
+- Build states (passed/failed) with visual indicators
+- Repository and branch information
+- Commit differences (SHA, message, author, date)
+- Build duration comparison
+- Timeline (started/finished times)
+- Job-by-job comparison with configurations
+- Pass/fail summary for each build
+- Smart recommendations for next steps
+
+**Example output:**
+```
+Build Comparison
+================================================================================
+
+Build #276783990 vs Build #276783991
+--------------------------------------------------------------------------------
+
+Build States:
+  Build #276783990: ✓ passed
+  Build #276783991: ✗ failed
+  ⚠ States differ!
+
+Repository:
+  Build #276783990: travis-ci/travis-web
+  Build #276783991: travis-ci/travis-web
+
+Branch:
+  Build #276783990: main
+  Build #276783991: main
+
+Commits:
+  Build #276783990:
+    SHA: a5962064
+    Message: Release_251110
+    Author: John Doe
+    Date: 2025-11-10T10:00:00Z
+  Build #276783991:
+    SHA: b7a83f21
+    Message: Update dependencies
+    Author: Jane Smith
+    Date: 2025-11-10T14:00:00Z
+  ⚠ Different commits!
+
+Build Duration:
+  Build #276783990: 5m 30s
+  Build #276783991: 3m 15s
+  Build #276783991 was 135s faster
+
+Job States:
+  Build #276783990:
+    ✓ Job #1.1: passed (node_js) - Node 18
+    ✓ Job #1.2: passed (node_js) - Node 20
+  Build #276783991:
+    ✓ Job #2.1: passed (node_js) - Node 18
+    ✗ Job #2.2: failed (node_js) - Node 20
+
+Summary:
+  Build #276783990: 2 passed, 0 failed
+  Build #276783991: 1 passed, 1 failed
+
+Recommendation:
+  • Build #276783990 passed but #276783991 failed
+  • Check commit differences and failed job logs for #276783991
+  • Use: "Show me logs for build 276783991" to investigate
+```
+
+**Use cases:**
+- Debug why a previously passing build started failing
+- Identify performance regressions (duration changes)
+- Compare matrix builds with different configurations
+- Track down which commit introduced a failure
+- Understand environmental differences between builds
+
 ## Setup
 
-### Requirements
+### Quick Setup (Recommended)
+
+Run the automated setup script:
+
+```bash
+cd mcp-travis
+./setup.sh
+```
+
+The script will:
+- ✓ Check system requirements (Node.js 18+)
+- ✓ Install dependencies
+- ✓ Build the project
+- ✓ Configure environment variables (prompts for your Travis CI API token)
+- ✓ Set up Claude Desktop integration automatically
+
+After setup completes, just **restart Claude Desktop** and you're ready to go!
+
+### Manual Setup
+
+If you prefer to set up manually:
+
+#### Requirements
 
 | Requirement | Version |
 |------------|---------|

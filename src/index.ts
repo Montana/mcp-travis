@@ -166,6 +166,18 @@ const tools = [
       type: "object",
       properties: {}
     }
+  },
+  {
+    name: "travis_compareBuilds",
+    description: "Compare two builds to see what changed between them. Useful for debugging why one build passed and another failed. Shows differences in commits, configuration, duration, and job outcomes.",
+    inputSchema: {
+      type: "object",
+      required: ["buildId1", "buildId2"],
+      properties: {
+        buildId1: { type: "integer", description: "First build ID to compare" },
+        buildId2: { type: "integer", description: "Second build ID to compare" }
+      }
+    }
   }
 ];
 
@@ -383,6 +395,263 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
         if (activeRepos.length > 10) {
           output += `\n... and ${activeRepos.length - 10} more active repositories\n`;
+        }
+      }
+
+      return { content: [{ type: "text", text: output }] };
+    }
+
+    if (name === "travis_getServiceStatus") {
+      try {
+        const statusRes = await request("https://www.traviscistatus.com/api/v2/status.json");
+        const statusText = await statusRes.body.text();
+        const statusData = JSON.parse(statusText);
+
+        const summaryRes = await request("https://www.traviscistatus.com/api/v2/summary.json");
+        const summaryText = await summaryRes.body.text();
+        const summaryData = JSON.parse(summaryText);
+
+        let output = `Travis CI Service Status\n`;
+        output += "=".repeat(80) + "\n\n";
+
+        const indicator = statusData.status?.indicator || 'unknown';
+        const description = statusData.status?.description || 'Unknown';
+
+        const statusEmoji: Record<string, string> = {
+          'none': '✓',
+          'minor': '⚠',
+          'major': '⚠⚠',
+          'critical': '✗'
+        };
+
+        output += `Overall Status: ${statusEmoji[indicator] || '?'} ${description.toUpperCase()}\n`;
+        output += `Last Updated: ${statusData.page?.updated_at || 'Unknown'}\n`;
+        output += `\n`;
+
+        const components = summaryData.components || [];
+        if (components.length > 0) {
+          output += `Service Components:\n`;
+          output += `-`.repeat(80) + `\n`;
+
+          for (const component of components) {
+            const compStatus = component.status || 'unknown';
+            const compEmoji = compStatus === 'operational' ? '✓' :
+                            compStatus === 'degraded_performance' ? '⚠' :
+                            compStatus === 'partial_outage' ? '⚠⚠' :
+                            compStatus === 'major_outage' ? '✗' : '?';
+
+            output += `${compEmoji} ${component.name}: ${compStatus.replace(/_/g, ' ')}\n`;
+          }
+        }
+
+        const incidents = summaryData.incidents || [];
+        if (incidents.length > 0) {
+          output += `\n`;
+          output += `Active Incidents:\n`;
+          output += `-`.repeat(80) + `\n`;
+
+          for (const incident of incidents) {
+            output += `⚠ ${incident.name}\n`;
+            output += `   Status: ${incident.status}\n`;
+            output += `   Impact: ${incident.impact}\n`;
+            if (incident.shortlink) output += `   More info: ${incident.shortlink}\n`;
+          }
+        } else {
+          output += `\n✓ No active incidents\n`;
+        }
+
+        // Scheduled maintenance
+        const maintenance = summaryData.scheduled_maintenances || [];
+        if (maintenance.length > 0) {
+          output += `\n`;
+          output += `Scheduled Maintenance:\n`;
+          output += `-`.repeat(80) + `\n`;
+
+          for (const maint of maintenance) {
+            output += `⏰ ${maint.name}\n`;
+            output += `   Scheduled: ${maint.scheduled_for}\n`;
+            if (maint.shortlink) output += `   More info: ${maint.shortlink}\n`;
+          }
+        }
+
+        output += `\n`;
+        output += `Status Page: https://www.traviscistatus.com\n`;
+
+        return { content: [{ type: "text", text: output }] };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Unable to fetch Travis CI status: ${error instanceof Error ? error.message : String(error)}\n\nYou can check manually at: https://www.traviscistatus.com`
+          }]
+        };
+      }
+    }
+
+    if (name === "travis_compareBuilds") {
+      const buildId1 = args?.buildId1 as number;
+      const buildId2 = args?.buildId2 as number;
+
+      if (!buildId1 || !buildId2) {
+        throw new Error("Both 'buildId1' and 'buildId2' parameters are required");
+      }
+
+      const [build1, build2] = await Promise.all([
+        travis(`/build/${buildId1}`),
+        travis(`/build/${buildId2}`)
+      ]);
+
+      let output = `Build Comparison\n`;
+      output += "=".repeat(80) + "\n\n";
+
+      output += `Build #${buildId1} vs Build #${buildId2}\n`;
+      output += `-`.repeat(80) + `\n\n`;
+
+      const state1 = build1.state || 'unknown';
+      const state2 = build2.state || 'unknown';
+      const emoji1 = state1 === 'passed' ? '✓' : state1 === 'failed' ? '✗' : '○';
+      const emoji2 = state2 === 'passed' ? '✓' : state2 === 'failed' ? '✗' : '○';
+
+      output += `Build States:\n`;
+      output += `  Build #${buildId1}: ${emoji1} ${state1}\n`;
+      output += `  Build #${buildId2}: ${emoji2} ${state2}\n`;
+      if (state1 !== state2) {
+        output += `  ⚠ States differ!\n`;
+      }
+      output += `\n`;
+
+      const repo1 = build1.repository?.slug || 'unknown';
+      const repo2 = build2.repository?.slug || 'unknown';
+      output += `Repository:\n`;
+      output += `  Build #${buildId1}: ${repo1}\n`;
+      output += `  Build #${buildId2}: ${repo2}\n`;
+      if (repo1 !== repo2) {
+        output += `  ⚠ Different repositories!\n`;
+      }
+      output += `\n`;
+
+      // Branch comparison
+      const branch1 = build1.branch?.name || 'unknown';
+      const branch2 = build2.branch?.name || 'unknown';
+      output += `Branch:\n`;
+      output += `  Build #${buildId1}: ${branch1}\n`;
+      output += `  Build #${buildId2}: ${branch2}\n`;
+      if (branch1 !== branch2) {
+        output += `  ⚠ Different branches!\n`;
+      }
+      output += `\n`;
+
+      // Commit comparison
+      const commit1 = build1.commit;
+      const commit2 = build2.commit;
+      output += `Commits:\n`;
+      if (commit1) {
+        output += `  Build #${buildId1}:\n`;
+        output += `    SHA: ${commit1.sha?.substring(0, 8) || 'unknown'}\n`;
+        output += `    Message: ${commit1.message?.split('\n')[0] || 'N/A'}\n`;
+        output += `    Author: ${commit1.author_name || 'unknown'}\n`;
+        output += `    Date: ${commit1.committed_at || 'unknown'}\n`;
+      }
+      if (commit2) {
+        output += `  Build #${buildId2}:\n`;
+        output += `    SHA: ${commit2.sha?.substring(0, 8) || 'unknown'}\n`;
+        output += `    Message: ${commit2.message?.split('\n')[0] || 'N/A'}\n`;
+        output += `    Author: ${commit2.author_name || 'unknown'}\n`;
+        output += `    Date: ${commit2.committed_at || 'unknown'}\n`;
+      }
+      if (commit1?.sha !== commit2?.sha) {
+        output += `  ⚠ Different commits!\n`;
+      }
+      output += `\n`;
+
+      const duration1 = build1.duration || 0;
+      const duration2 = build2.duration || 0;
+      output += `Build Duration:\n`;
+      output += `  Build #${buildId1}: ${Math.floor(duration1 / 60)}m ${duration1 % 60}s\n`;
+      output += `  Build #${buildId2}: ${Math.floor(duration2 / 60)}m ${duration2 % 60}s\n`;
+      if (duration1 && duration2) {
+        const diff = Math.abs(duration1 - duration2);
+        const faster = duration1 < duration2 ? buildId1 : buildId2;
+        output += `  Build #${faster} was ${diff}s faster\n`;
+      }
+      output += `\n`;
+
+      output += `Timeline:\n`;
+      output += `  Build #${buildId1}:\n`;
+      output += `    Started: ${build1.started_at || 'N/A'}\n`;
+      output += `    Finished: ${build1.finished_at || 'N/A'}\n`;
+      output += `  Build #${buildId2}:\n`;
+      output += `    Started: ${build2.started_at || 'N/A'}\n`;
+      output += `    Finished: ${build2.finished_at || 'N/A'}\n`;
+      output += `\n`;
+
+      const jobs1 = build1.jobs || [];
+      const jobs2 = build2.jobs || [];
+      output += `Jobs:\n`;
+      output += `  Build #${buildId1}: ${jobs1.length} job(s)\n`;
+      output += `  Build #${buildId2}: ${jobs2.length} job(s)\n`;
+
+      if (jobs1.length > 0 || jobs2.length > 0) {
+        output += `\n`;
+        output += `Job States:\n`;
+        output += `-`.repeat(80) + `\n`;
+
+        if (jobs1.length > 0) {
+          output += `  Build #${buildId1}:\n`;
+          for (const job of jobs1) {
+            const jobState = job.state || 'unknown';
+            const jobEmoji = jobState === 'passed' ? '✓' : jobState === 'failed' ? '✗' : '○';
+            output += `    ${jobEmoji} Job #${job.number}: ${jobState}`;
+            if (job.config?.language) output += ` (${job.config.language})`;
+            if (job.config?.node_js) output += ` - Node ${job.config.node_js}`;
+            if (job.config?.python) output += ` - Python ${job.config.python}`;
+            if (job.config?.ruby) output += ` - Ruby ${job.config.ruby}`;
+            output += `\n`;
+          }
+        }
+
+        if (jobs2.length > 0) {
+          output += `  Build #${buildId2}:\n`;
+          for (const job of jobs2) {
+            const jobState = job.state || 'unknown';
+            const jobEmoji = jobState === 'passed' ? '✓' : jobState === 'failed' ? '✗' : '○';
+            output += `    ${jobEmoji} Job #${job.number}: ${jobState}`;
+            if (job.config?.language) output += ` (${job.config.language})`;
+            if (job.config?.node_js) output += ` - Node ${job.config.node_js}`;
+            if (job.config?.python) output += ` - Python ${job.config.python}`;
+            if (job.config?.ruby) output += ` - Ruby ${job.config.ruby}`;
+            output += `\n`;
+          }
+        }
+
+        const passed1 = jobs1.filter((j: any) => j.state === 'passed').length;
+        const failed1 = jobs1.filter((j: any) => j.state === 'failed').length;
+        const passed2 = jobs2.filter((j: any) => j.state === 'passed').length;
+        const failed2 = jobs2.filter((j: any) => j.state === 'failed').length;
+
+        output += `\n`;
+        output += `Summary:\n`;
+        output += `  Build #${buildId1}: ${passed1} passed, ${failed1} failed\n`;
+        output += `  Build #${buildId2}: ${passed2} passed, ${failed2} failed\n`;
+      }
+
+      output += `\n`;
+      output += `Recommendation:\n`;
+      if (state1 === 'passed' && state2 === 'failed') {
+        output += `  • Build #${buildId1} passed but #${buildId2} failed\n`;
+        output += `  • Check commit differences and failed job logs for #${buildId2}\n`;
+        output += `  • Use: "Show me logs for build ${buildId2}" to investigate\n`;
+      } else if (state1 === 'failed' && state2 === 'passed') {
+        output += `  • Build #${buildId2} passed but #${buildId1} failed\n`;
+        output += `  • Check commit differences and failed job logs for #${buildId1}\n`;
+        output += `  • Use: "Show me logs for build ${buildId1}" to investigate\n`;
+      } else if (state1 === state2) {
+        output += `  • Both builds have the same state: ${state1}\n`;
+        if (commit1?.sha !== commit2?.sha) {
+          output += `  • Different commits may have different behaviors\n`;
+        }
+        if (duration1 && duration2 && Math.abs(duration1 - duration2) > 60) {
+          output += `  • Significant duration difference - check for performance changes\n`;
         }
       }
 
