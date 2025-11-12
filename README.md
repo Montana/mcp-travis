@@ -418,9 +418,14 @@ Ask Claude: "Give me optimization recommendations for build 276783990"
 Ask Claude: "What can I do to speed up build 276783990?"
 ```
 
-See it in action:
+This will show you a few things, a summary of what can be changed:
 
-[![Watch the video](https://github.com/user-attachments/assets/93cb09b1-2dbd-4dd4-8cd6-1cbf9cb2a1a2)](https://github.com/user-attachments/assets/93cb09b1-2dbd-4dd4-8cd6-1cbf9cb2a1a2)
+
+<img width="858" height="936" alt="Screenshot 2025-11-12 at 9 34 13 AM" src="https://github.com/user-attachments/assets/cdc50db0-b397-4539-b130-ab03dc3540bb" />
+
+Then how much time in aggregate it should save you: 
+
+<img width="918" height="733" alt="Screenshot 2025-11-12 at 9 36 41 AM" src="https://github.com/user-attachments/assets/1db53bd0-96cb-4e60-8fb4-187e8d2dca8f" />
 
 This tool analyzes all job logs from a build and provides intelligent recommendations for:
 - **Dependency Caching**: Detects package installations and suggests caching strategies
@@ -437,6 +442,10 @@ This tool analyzes all job logs from a build and provides intelligent recommenda
 - Docker operations (pull, build)
 - Cache hits and misses
 - Redundant setup operations
+
+See it in action:
+
+[![Watch the video](https://github.com/user-attachments/assets/93cb09b1-2dbd-4dd4-8cd6-1cbf9cb2a1a2)](https://github.com/user-attachments/assets/93cb09b1-2dbd-4dd4-8cd6-1cbf9cb2a1a2)
 
 **Example output:**
 ```
