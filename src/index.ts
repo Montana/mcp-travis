@@ -484,7 +484,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           output += `\n✓ No active incidents\n`;
         }
 
-        // Scheduled maintenance
         const maintenance = summaryData.scheduled_maintenances || [];
         if (maintenance.length > 0) {
           output += `\n`;
@@ -860,7 +859,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         throw new Error("Parameter 'buildId' is required");
       }
 
-      // Fetch build details and all job logs
       const buildData: TravisBuild = await travis(`/build/${buildId}`);
       const jobs = buildData.jobs || [];
 
@@ -873,7 +871,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
       }
 
-      // Fetch logs for all jobs
       const logPromises = jobs.map(async (job: TravisJob): Promise<{ jobId: number; jobNumber: string; log: string; duration?: number }> => {
         try {
           const log = await travis(`/job/${job.id}/log.txt`);
@@ -896,15 +893,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
       const jobLogs = await Promise.all(logPromises);
 
-      // Analysis patterns
       const findings: { category: string; detail: string }[] = [];
 
-      // Analyze each job's log
       for (const jobLog of jobLogs) {
         const log = jobLog.log;
         const lines = log.split('\n');
 
-        // Pattern 1: Detect slow dependency installation
         const npmInstallLines = lines.filter(line =>
           line.includes('npm install') ||
           line.includes('npm ci') ||
@@ -920,7 +914,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           });
         }
 
-        // Pattern 2: Check for cache usage
         const cacheHitPattern = /cache.*hit|using cached|cache.*restored/i;
         const cacheMissPattern = /cache.*miss|cache.*not found|downloading/i;
         const hasCacheHit = lines.some(line => cacheHitPattern.test(line));
@@ -933,7 +926,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           });
         }
 
-        // Pattern 3: Detect compilation/build steps
         const compilationPatterns = [
           /tsc|typescript compiler/i,
           /webpack|rollup|vite/i,
@@ -952,7 +944,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           }
         }
 
-        // Pattern 4: Detect test execution time
         const testPatterns = [
           /(\d+)\s+tests?,\s+(\d+)\s+passed/i,
           /test suites?:.*\d+.*passed/i,
@@ -971,7 +962,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           }
         }
 
-        // Pattern 5: Detect Docker operations
         if (log.includes('docker pull') || log.includes('docker build')) {
           findings.push({
             category: "Docker",
@@ -979,7 +969,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           });
         }
 
-        // Pattern 6: Detect repeated operations across jobs
         const setupSteps = lines.filter(line =>
           line.includes('Setting up') ||
           line.includes('Installing') ||
@@ -994,20 +983,17 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
       }
 
-      // Generate recommendations based on findings
       const categoryCount: Record<string, number> = {};
       for (const finding of findings) {
         categoryCount[finding.category] = (categoryCount[finding.category] || 0) + 1;
       }
 
-      // Build output
       let output = `Build Optimization Recommendations for Build #${buildId}\n`;
       output += "=".repeat(80) + "\n\n";
 
       output += `Analyzed ${jobs.length} job(s) across this build\n`;
       output += `\n`;
 
-      // Key findings summary
       output += `Key Findings:\n`;
       output += `-`.repeat(80) + `\n`;
 
@@ -1021,7 +1007,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       output += `\n`;
 
-      // Detailed findings
       if (findings.length > 0) {
         output += `Detailed Analysis:\n`;
         output += `-`.repeat(80) + `\n`;
@@ -1043,7 +1028,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         output += `\n`;
       }
 
-      // Generate actionable recommendations
       output += `Optimization Recommendations:\n`;
       output += `-`.repeat(80) + `\n`;
 
@@ -1101,14 +1085,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         output += `  • Reduce unnecessary installs and downloads\n`;
       }
 
-      // General recommendations
       output += `\n🎯 General Best Practices:\n`;
       output += `  • Use 'fast_finish: true' in build matrix to fail fast\n`;
       output += `  • Leverage build stages for dependent job execution\n`;
       output += `  • Consider conditional builds (skip builds for doc-only changes)\n`;
       output += `  • Monitor build times regularly and set up alerts for regressions\n`;
 
-      // Job duration analysis
       if (jobLogs.some(j => j.duration)) {
         output += `\n`;
         output += `Job Duration Analysis:\n`;
