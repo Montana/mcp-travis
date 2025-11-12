@@ -191,6 +191,17 @@ const tools = [
         branch: { type: "string", description: "Optional: Filter by specific branch" }
       }
     }
+  },
+  {
+    name: "travis_getOptimizationRecommendations",
+    description: "Analyze build logs to provide optimization recommendations. Identifies slow steps, suggests caching opportunities, detects redundant operations, and recommends parallelization improvements.",
+    inputSchema: {
+      type: "object",
+      required: ["buildId"],
+      properties: {
+        buildId: { type: "integer", description: "The build ID to analyze for optimization opportunities" }
+      }
+    }
   }
 ];
 
@@ -838,6 +849,296 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (failedBuilds > passedBuilds) {
         output += `⚠ More failures than passes. Review recent commits and build configuration\n`;
       }
+
+      return { content: [{ type: "text", text: output }] };
+    }
+
+    if (name === "travis_getOptimizationRecommendations") {
+      const buildId = args?.buildId as number;
+
+      if (!buildId) {
+        throw new Error("Parameter 'buildId' is required");
+      }
+
+      // Fetch build details and all job logs
+      const buildData: TravisBuild = await travis(`/build/${buildId}`);
+      const jobs = buildData.jobs || [];
+
+      if (jobs.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: "No jobs found for this build."
+          }]
+        };
+      }
+
+      // Fetch logs for all jobs
+      const logPromises = jobs.map(async (job: TravisJob): Promise<{ jobId: number; jobNumber: string; log: string; duration?: number }> => {
+        try {
+          const log = await travis(`/job/${job.id}/log.txt`);
+          const jobDetails = await travis(`/job/${job.id}`);
+          return {
+            jobId: job.id,
+            jobNumber: job.number,
+            log: log,
+            duration: jobDetails.duration
+          };
+        } catch (error) {
+          return {
+            jobId: job.id,
+            jobNumber: job.number,
+            log: `Error fetching log: ${error}`,
+            duration: undefined
+          };
+        }
+      });
+
+      const jobLogs = await Promise.all(logPromises);
+
+      // Analysis patterns
+      const findings: { category: string; detail: string }[] = [];
+
+      // Analyze each job's log
+      for (const jobLog of jobLogs) {
+        const log = jobLog.log;
+        const lines = log.split('\n');
+
+        // Pattern 1: Detect slow dependency installation
+        const npmInstallLines = lines.filter(line =>
+          line.includes('npm install') ||
+          line.includes('npm ci') ||
+          line.includes('yarn install') ||
+          line.includes('pip install') ||
+          line.includes('bundle install')
+        );
+
+        if (npmInstallLines.length > 0) {
+          findings.push({
+            category: "Dependency Installation",
+            detail: `Job #${jobLog.jobNumber}: Detected package installation. Consider caching dependencies.`
+          });
+        }
+
+        // Pattern 2: Check for cache usage
+        const cacheHitPattern = /cache.*hit|using cached|cache.*restored/i;
+        const cacheMissPattern = /cache.*miss|cache.*not found|downloading/i;
+        const hasCacheHit = lines.some(line => cacheHitPattern.test(line));
+        const hasCacheMiss = lines.some(line => cacheMissPattern.test(line));
+
+        if (hasCacheMiss && !hasCacheHit) {
+          findings.push({
+            category: "Caching",
+            detail: `Job #${jobLog.jobNumber}: Cache misses detected. Verify cache configuration.`
+          });
+        }
+
+        // Pattern 3: Detect compilation/build steps
+        const compilationPatterns = [
+          /tsc|typescript compiler/i,
+          /webpack|rollup|vite/i,
+          /mvn compile|gradle build/i,
+          /cargo build|go build/i,
+          /npm run build|yarn build/i
+        ];
+
+        for (const pattern of compilationPatterns) {
+          if (lines.some(line => pattern.test(line))) {
+            findings.push({
+              category: "Build Process",
+              detail: `Job #${jobLog.jobNumber}: Build/compilation detected. Consider caching build artifacts.`
+            });
+            break;
+          }
+        }
+
+        // Pattern 4: Detect test execution time
+        const testPatterns = [
+          /(\d+)\s+tests?,\s+(\d+)\s+passed/i,
+          /test suites?:.*\d+.*passed/i,
+          /tests?.*completed in.*(\d+\.?\d*)\s*(s|ms|min)/i,
+          /finished in.*(\d+\.?\d*)\s*seconds?/i
+        ];
+
+        for (const pattern of testPatterns) {
+          const match = log.match(pattern);
+          if (match) {
+            findings.push({
+              category: "Testing",
+              detail: `Job #${jobLog.jobNumber}: Tests detected. Consider test splitting for parallel execution.`
+            });
+            break;
+          }
+        }
+
+        // Pattern 5: Detect Docker operations
+        if (log.includes('docker pull') || log.includes('docker build')) {
+          findings.push({
+            category: "Docker",
+            detail: `Job #${jobLog.jobNumber}: Docker operations found. Consider using Docker layer caching.`
+          });
+        }
+
+        // Pattern 6: Detect repeated operations across jobs
+        const setupSteps = lines.filter(line =>
+          line.includes('Setting up') ||
+          line.includes('Installing') ||
+          line.includes('Downloading')
+        );
+
+        if (setupSteps.length > 10) {
+          findings.push({
+            category: "Setup Overhead",
+            detail: `Job #${jobLog.jobNumber}: Multiple setup operations detected (${setupSteps.length} steps).`
+          });
+        }
+      }
+
+      // Generate recommendations based on findings
+      const categoryCount: Record<string, number> = {};
+      for (const finding of findings) {
+        categoryCount[finding.category] = (categoryCount[finding.category] || 0) + 1;
+      }
+
+      // Build output
+      let output = `Build Optimization Recommendations for Build #${buildId}\n`;
+      output += "=".repeat(80) + "\n\n";
+
+      output += `Analyzed ${jobs.length} job(s) across this build\n`;
+      output += `\n`;
+
+      // Key findings summary
+      output += `Key Findings:\n`;
+      output += `-`.repeat(80) + `\n`;
+
+      if (Object.keys(categoryCount).length === 0) {
+        output += `✓ No obvious optimization opportunities detected.\n`;
+        output += `  Your build appears to be well-optimized!\n`;
+      } else {
+        for (const [category, count] of Object.entries(categoryCount)) {
+          output += `• ${category}: ${count} occurrence(s)\n`;
+        }
+      }
+      output += `\n`;
+
+      // Detailed findings
+      if (findings.length > 0) {
+        output += `Detailed Analysis:\n`;
+        output += `-`.repeat(80) + `\n`;
+
+        const grouped: Record<string, string[]> = {};
+        for (const finding of findings) {
+          if (!grouped[finding.category]) {
+            grouped[finding.category] = [];
+          }
+          grouped[finding.category].push(finding.detail);
+        }
+
+        for (const [category, details] of Object.entries(grouped)) {
+          output += `\n${category}:\n`;
+          for (const detail of details) {
+            output += `  • ${detail}\n`;
+          }
+        }
+        output += `\n`;
+      }
+
+      // Generate actionable recommendations
+      output += `Optimization Recommendations:\n`;
+      output += `-`.repeat(80) + `\n`;
+
+      if (categoryCount["Dependency Installation"]) {
+        output += `\n📦 Dependency Caching:\n`;
+        output += `  • Enable Travis CI's built-in cache for dependencies\n`;
+        output += `  • Add to .travis.yml:\n`;
+        output += `    cache:\n`;
+        output += `      directories:\n`;
+        output += `        - node_modules  # for Node.js\n`;
+        output += `        - ~/.npm\n`;
+        output += `        - ~/.cache/pip  # for Python\n`;
+        output += `        - vendor/bundle # for Ruby\n`;
+        output += `  • Use 'npm ci' instead of 'npm install' for faster, reproducible builds\n`;
+      }
+
+      if (categoryCount["Build Process"]) {
+        output += `\n🔨 Build Artifact Caching:\n`;
+        output += `  • Cache compiled/built artifacts between builds\n`;
+        output += `  • Add build output directories to cache configuration\n`;
+        output += `  • Consider incremental compilation if supported by your tooling\n`;
+        output += `  • Example: cache: { directories: ['dist', 'build', '.next'] }\n`;
+      }
+
+      if (categoryCount["Testing"]) {
+        output += `\n🧪 Test Optimization:\n`;
+        output += `  • Split tests across multiple jobs for parallel execution\n`;
+        output += `  • Use test sharding/splitting based on timing data\n`;
+        output += `  • Consider running unit tests before slower integration tests\n`;
+        output += `  • Run only affected tests for PR builds\n`;
+        output += `  • Example: Use build matrix to run test suites in parallel\n`;
+      }
+
+      if (categoryCount["Docker"]) {
+        output += `\n🐳 Docker Optimization:\n`;
+        output += `  • Enable Docker layer caching in Travis CI\n`;
+        output += `  • Use multi-stage builds to reduce image size\n`;
+        output += `  • Pull images before build to cache them\n`;
+        output += `  • Consider using smaller base images (alpine variants)\n`;
+      }
+
+      if (categoryCount["Caching"]) {
+        output += `\n💾 Cache Configuration:\n`;
+        output += `  • Review cache key strategy to ensure proper invalidation\n`;
+        output += `  • Verify cache paths are correct for your project structure\n`;
+        output += `  • Monitor cache hit rates in subsequent builds\n`;
+        output += `  • Clear cache if seeing stale dependency issues\n`;
+      }
+
+      if (categoryCount["Setup Overhead"]) {
+        output += `\n⚡ Reduce Setup Overhead:\n`;
+        output += `  • Consolidate similar setup steps\n`;
+        output += `  • Use custom Docker images with pre-installed tools\n`;
+        output += `  • Move one-time setup to 'before_install' phase\n`;
+        output += `  • Reduce unnecessary installs and downloads\n`;
+      }
+
+      // General recommendations
+      output += `\n🎯 General Best Practices:\n`;
+      output += `  • Use 'fast_finish: true' in build matrix to fail fast\n`;
+      output += `  • Leverage build stages for dependent job execution\n`;
+      output += `  • Consider conditional builds (skip builds for doc-only changes)\n`;
+      output += `  • Monitor build times regularly and set up alerts for regressions\n`;
+
+      // Job duration analysis
+      if (jobLogs.some(j => j.duration)) {
+        output += `\n`;
+        output += `Job Duration Analysis:\n`;
+        output += `-`.repeat(80) + `\n`;
+
+        const sortedJobs = jobLogs
+          .filter(j => j.duration)
+          .sort((a, b) => (b.duration || 0) - (a.duration || 0));
+
+        if (sortedJobs.length > 0) {
+          output += `Slowest jobs:\n`;
+          for (const job of sortedJobs.slice(0, 3)) {
+            const minutes = Math.floor((job.duration || 0) / 60);
+            const seconds = (job.duration || 0) % 60;
+            output += `  • Job #${job.jobNumber}: ${minutes}m ${seconds}s\n`;
+          }
+
+          if (sortedJobs[0].duration && sortedJobs[0].duration > 300) {
+            output += `\n⚠ Slowest job takes over 5 minutes - consider optimization strategies above\n`;
+          }
+        }
+      }
+
+      output += `\n`;
+      output += `Next Steps:\n`;
+      output += `-`.repeat(80) + `\n`;
+      output += `1. Review the recommendations above\n`;
+      output += `2. Update your .travis.yml with caching configuration\n`;
+      output += `3. Monitor subsequent build times for improvements\n`;
+      output += `4. Use 'travis_compareBuilds' to compare before/after optimization\n`;
 
       return { content: [{ type: "text", text: output }] };
     }
