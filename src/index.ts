@@ -178,6 +178,19 @@ const tools = [
         buildId2: { type: "integer", description: "Second build ID to compare" }
       }
     }
+  },
+  {
+    name: "travis_getBuildInsights",
+    description: "Get aggregated build statistics and insights for a repository. Shows build trends, pass/fail rates, duration analysis, and identifies patterns over time.",
+    inputSchema: {
+      type: "object",
+      required: ["repo"],
+      properties: {
+        repo: { type: "string", description: "Repository slug like owner/name" },
+        limit: { type: "integer", description: "Number of recent builds to analyze (default: 50, max: 100)", default: 50 },
+        branch: { type: "string", description: "Optional: Filter by specific branch" }
+      }
+    }
   }
 ];
 
@@ -530,7 +543,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       output += `\n`;
 
-      // Branch comparison
       const branch1 = build1.branch?.name || 'unknown';
       const branch2 = build2.branch?.name || 'unknown';
       output += `Branch:\n`;
@@ -541,7 +553,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       output += `\n`;
 
-      // Commit comparison
       const commit1 = build1.commit;
       const commit2 = build2.commit;
       output += `Commits:\n`;
@@ -653,6 +664,179 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (duration1 && duration2 && Math.abs(duration1 - duration2) > 60) {
           output += `  • Significant duration difference - check for performance changes\n`;
         }
+      }
+
+      return { content: [{ type: "text", text: output }] };
+    }
+
+    if (name === "travis_getBuildInsights") {
+      const repo = args?.repo as string;
+      const limit = Math.min((args?.limit as number) || 50, 100);
+      const branch = args?.branch as string | undefined;
+
+      if (!repo) {
+        throw new Error("Parameter 'repo' is required");
+      }
+
+      let buildPath = `/repo/${encodeURIComponent(repo)}/builds?limit=${limit}`;
+      if (branch) {
+        buildPath += `&branch.name=${encodeURIComponent(branch)}`;
+      }
+
+      const buildsData = await travis(buildPath);
+      const builds = buildsData.builds || [];
+
+      if (builds.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: `No builds found for repository: ${repo}${branch ? ` (branch: ${branch})` : ''}`
+          }]
+        };
+      }
+
+      let totalBuilds = builds.length;
+      let passedBuilds = 0;
+      let failedBuilds = 0;
+      let canceledBuilds = 0;
+      let erroredBuilds = 0;
+      let totalDuration = 0;
+      let buildsWithDuration = 0;
+      let durations: number[] = [];
+
+      const stateCount: Record<string, number> = {};
+      const branchStats: Record<string, { passed: number; failed: number; total: number }> = {};
+
+      for (const build of builds) {
+        const state = build.state || 'unknown';
+        stateCount[state] = (stateCount[state] || 0) + 1;
+
+        if (state === 'passed') passedBuilds++;
+        else if (state === 'failed') failedBuilds++;
+        else if (state === 'canceled') canceledBuilds++;
+        else if (state === 'errored') erroredBuilds++;
+
+        if (build.duration && build.duration > 0) {
+          totalDuration += build.duration;
+          durations.push(build.duration);
+          buildsWithDuration++;
+        }
+
+        const branchName = build.branch?.name || 'unknown';
+        if (!branchStats[branchName]) {
+          branchStats[branchName] = { passed: 0, failed: 0, total: 0 };
+        }
+        branchStats[branchName].total++;
+        if (state === 'passed') branchStats[branchName].passed++;
+        if (state === 'failed') branchStats[branchName].failed++;
+      }
+
+      durations.sort((a, b) => a - b);
+      const avgDuration = buildsWithDuration > 0 ? totalDuration / buildsWithDuration : 0;
+      const medianDuration = durations.length > 0 ? durations[Math.floor(durations.length / 2)] : 0;
+      const minDuration = durations.length > 0 ? durations[0] : 0;
+      const maxDuration = durations.length > 0 ? durations[durations.length - 1] : 0;
+
+      const completedBuilds = passedBuilds + failedBuilds + erroredBuilds;
+      const passRate = completedBuilds > 0 ? (passedBuilds / completedBuilds) * 100 : 0;
+
+      const recentBuilds = builds.slice(0, Math.min(10, builds.length));
+      const recentPassed = recentBuilds.filter((b: any) => b.state === 'passed').length;
+      const recentFailed = recentBuilds.filter((b: any) => b.state === 'failed').length;
+      const recentCompletedBuilds = recentPassed + recentFailed;
+      const recentPassRate = recentCompletedBuilds > 0 ? (recentPassed / recentCompletedBuilds) * 100 : 0;
+
+      const recentFailures = builds.filter((b: any) => b.state === 'failed' || b.state === 'errored').slice(0, 5);
+
+      let output = `Build Insights for: ${repo}\n`;
+      if (branch) output += `Branch: ${branch}\n`;
+      output += "=".repeat(80) + "\n\n";
+
+      output += `Analyzing ${totalBuilds} most recent build(s)\n`;
+      output += `\n`;
+
+      output += `Overall Statistics:\n`;
+      output += `-`.repeat(80) + `\n`;
+      output += `✓ Passed: ${passedBuilds} (${passRate.toFixed(1)}%)\n`;
+      output += `✗ Failed: ${failedBuilds}\n`;
+      if (erroredBuilds > 0) output += `⚠ Errored: ${erroredBuilds}\n`;
+      if (canceledBuilds > 0) output += `○ Canceled: ${canceledBuilds}\n`;
+      output += `\n`;
+
+      output += `Recent Trend (Last 10 Builds):\n`;
+      output += `-`.repeat(80) + `\n`;
+      output += `Pass Rate: ${recentPassRate.toFixed(1)}%`;
+      if (recentPassRate > passRate + 5) {
+        output += ` 📈 Improving!\n`;
+      } else if (recentPassRate < passRate - 5) {
+        output += ` 📉 Declining\n`;
+      } else {
+        output += ` ➡ Stable\n`;
+      }
+      output += `\n`;
+
+      if (buildsWithDuration > 0) {
+        output += `Build Duration Analysis:\n`;
+        output += `-`.repeat(80) + `\n`;
+        output += `Average: ${Math.floor(avgDuration / 60)}m ${avgDuration % 60}s\n`;
+        output += `Median: ${Math.floor(medianDuration / 60)}m ${medianDuration % 60}s\n`;
+        output += `Fastest: ${Math.floor(minDuration / 60)}m ${minDuration % 60}s\n`;
+        output += `Slowest: ${Math.floor(maxDuration / 60)}m ${maxDuration % 60}s\n`;
+        output += `\n`;
+      }
+
+      if (!branch && Object.keys(branchStats).length > 1) {
+        output += `Branch Breakdown:\n`;
+        output += `-`.repeat(80) + `\n`;
+
+        const sortedBranches = Object.entries(branchStats)
+          .sort(([, a], [, b]) => b.total - a.total)
+          .slice(0, 5);
+
+        for (const [branchName, stats] of sortedBranches) {
+          const branchPassRate = stats.total > 0 ? (stats.passed / stats.total) * 100 : 0;
+          output += `${branchName}: ${stats.total} builds, ${branchPassRate.toFixed(1)}% pass rate\n`;
+        }
+        output += `\n`;
+      }
+
+      if (recentFailures.length > 0) {
+        output += `Recent Failures:\n`;
+        output += `-`.repeat(80) + `\n`;
+        for (const build of recentFailures) {
+          const buildNumber = build.number || build.id;
+          const branchName = build.branch?.name || 'unknown';
+          const commitMsg = build.commit?.message?.split('\n')[0] || 'N/A';
+          const finishedAt = build.finished_at ? new Date(build.finished_at).toISOString().split('T')[0] : 'N/A';
+          output += `✗ Build #${buildNumber} (${branchName}) - ${finishedAt}\n`;
+          output += `  "${commitMsg.substring(0, 60)}${commitMsg.length > 60 ? '...' : ''}"\n`;
+        }
+        output += `\n`;
+      }
+
+      output += `Insights & Recommendations:\n`;
+      output += `-`.repeat(80) + `\n`;
+
+      if (passRate >= 90) {
+        output += `✓ Excellent build stability! ${passRate.toFixed(1)}% pass rate\n`;
+      } else if (passRate >= 75) {
+        output += `⚠ Good build stability at ${passRate.toFixed(1)}%, but there's room for improvement\n`;
+      } else if (passRate >= 50) {
+        output += `⚠ Moderate build stability at ${passRate.toFixed(1)}%. Consider investigating common failure patterns\n`;
+      } else {
+        output += `✗ Low build stability at ${passRate.toFixed(1)}%. Urgent attention needed\n`;
+      }
+
+      if (recentPassRate < passRate - 10) {
+        output += `📉 Recent builds are failing more frequently. Investigate recent changes\n`;
+      }
+
+      if (maxDuration > avgDuration * 1.5) {
+        output += `⏱ Some builds are significantly slower than average. Check for performance issues\n`;
+      }
+
+      if (failedBuilds > passedBuilds) {
+        output += `⚠ More failures than passes. Review recent commits and build configuration\n`;
       }
 
       return { content: [{ type: "text", text: output }] };

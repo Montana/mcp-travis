@@ -7,6 +7,7 @@ Model Context Protocol (MCP) server that exposes Travis CI API as tools and reso
 - 📊 View build logs and job details
 - 🔄 Compare builds to debug failures
 - 📈 Get organization/user statistics
+- 📉 Analyze build trends and performance metrics
 - 🔍 Monitor Travis CI service status
 - 🔧 Manage builds through natural language
 
@@ -34,6 +35,7 @@ Here are some things you can ask Claude with this MCP server:
 
 - **"Show me the logs for Travis build 276783990"** - View complete build logs
 - **"Compare builds 276783990 and 276783991"** - See what changed between two builds
+- **"Show me build insights for travis-ci/travis-web"** - Analyze build trends and performance
 - **"Trigger a build for travis-ci/travis-web on branch deploy_2025.11.10"** - Start a new build
 - **"What's the Travis CI status for the rails organization?"** - Get org statistics
 - **"Is Travis CI down?"** - Check service operational status
@@ -63,6 +65,7 @@ Here are some things you can ask Claude with this MCP server:
 | `travis_getOwnerStats` | Get statistics and information for a Travis CI user or organization |
 | `travis_getServiceStatus` | Check the operational status of Travis CI services |
 | `travis_compareBuilds` | Compare two builds to see what changed between them |
+| `travis_getBuildInsights` | Get aggregated build statistics and insights for a repository over time |
 
 ### Getting Build Logs
 
@@ -285,6 +288,79 @@ Recommendation:
 - Compare matrix builds with different configurations
 - Track down which commit introduced a failure
 - Understand environmental differences between builds
+
+### Getting Build Insights & Metrics
+
+Use `travis_getBuildInsights` to analyze build trends and get aggregated statistics:
+
+```
+Ask Claude: "Show me build insights for travis-ci/travis-web"
+Ask Claude: "What are the build trends for owner/repo?"
+Ask Claude: "Analyze recent builds for owner/repo on the main branch"
+```
+
+This returns comprehensive analytics including:
+- Overall pass/fail rates across multiple builds
+- Recent trend analysis (improving/declining/stable)
+- Build duration statistics (average, median, fastest, slowest)
+- Per-branch breakdown of build success rates
+- Recent failures with commit information
+- Actionable insights and recommendations
+
+**Parameters:**
+- `repo` (required): Repository slug (e.g., "travis-ci/travis-web")
+- `limit` (optional): Number of recent builds to analyze (default: 50, max: 100)
+- `branch` (optional): Filter analysis to a specific branch
+
+**Example output:**
+```
+Build Insights for: travis-ci/travis-web
+================================================================================
+
+Analyzing 50 most recent build(s)
+
+Overall Statistics:
+--------------------------------------------------------------------------------
+✓ Passed: 42 (84.0%)
+✗ Failed: 8
+
+Recent Trend (Last 10 Builds):
+--------------------------------------------------------------------------------
+Pass Rate: 90.0% 📈 Improving!
+
+Build Duration Analysis:
+--------------------------------------------------------------------------------
+Average: 5m 30s
+Median: 5m 15s
+Fastest: 3m 20s
+Slowest: 8m 45s
+
+Branch Breakdown:
+--------------------------------------------------------------------------------
+main: 35 builds, 85.7% pass rate
+develop: 10 builds, 80.0% pass rate
+feature/new-ui: 5 builds, 80.0% pass rate
+
+Recent Failures:
+--------------------------------------------------------------------------------
+✗ Build #276783991 (main) - 2025-11-10
+  "Update dependencies to latest versions"
+✗ Build #276783985 (develop) - 2025-11-09
+  "Fix authentication bug in user login flow"
+
+Insights & Recommendations:
+--------------------------------------------------------------------------------
+✓ Excellent build stability! 84.0% pass rate
+📈 Recent builds are improving - great work!
+```
+
+**Use cases:**
+- Monitor overall project health and build stability
+- Identify trends in build success/failure rates
+- Spot performance regressions in build times
+- Compare branch stability across your repository
+- Make data-driven decisions about CI/CD improvements
+- Track the impact of recent changes on build reliability
 
 ## Setup
 
